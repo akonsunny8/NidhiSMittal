@@ -235,6 +235,7 @@ if ("IntersectionObserver" in window) {
 }
 
 const filters = document.querySelectorAll("[data-filter]");
+const blogFilters = document.querySelector("[data-blog-filters]");
 const blogSearch = document.querySelector("[data-blog-search]");
 const blogEmpty = document.querySelector("[data-blog-empty]");
 const blogPagination = document.querySelector("[data-blog-pagination]");
@@ -276,7 +277,9 @@ function blogCategoryLabel(category) {
 
 function getBlogUrlState() {
   const params = new URLSearchParams(window.location.search);
-  const hashCategory = window.location.hash.replace(/^#category=/, "").replace(/^#/, "");
+  const hashCategory = window.location.hash.startsWith("#category=")
+    ? window.location.hash.replace(/^#category=/, "")
+    : "";
   const rawCategory = params.get("category") || params.get("filter") || hashCategory;
   return {
     category: normalizeBlogCategory(rawCategory),
@@ -357,13 +360,16 @@ function articleMatchesSearch(article, query) {
 
 filters.forEach((filter) => {
   filter.setAttribute("aria-pressed", String(filter.classList.contains("active")));
-  filter.addEventListener("click", () => {
-    blogState.category = filter.dataset.filter;
-    blogState.query = "";
-    blogState.page = 1;
-    if (blogSearch) blogSearch.value = "";
-    applyBlogFilter(blogState.category, { updateUrl: true });
-  });
+});
+
+blogFilters?.addEventListener("click", (event) => {
+  const filter = event.target.closest("[data-filter]");
+  if (!filter || !blogFilters.contains(filter)) return;
+  blogState.category = filter.dataset.filter;
+  blogState.query = "";
+  blogState.page = 1;
+  if (blogSearch) blogSearch.value = "";
+  applyBlogFilter(blogState.category, { updateUrl: true });
 });
 
 blogSearch?.addEventListener("input", () => {
@@ -386,13 +392,101 @@ window.addEventListener("popstate", () => {
   initBlogFiltersFromUrl();
 });
 
-document.querySelectorAll("[data-expand]").forEach((button) => {
-  button.dataset.closedLabel = button.textContent;
-  button.addEventListener("click", () => {
-    const card = button.closest(".article-card");
-    const expanded = card.classList.toggle("expanded");
-    button.textContent = expanded ? "Close note" : button.dataset.closedLabel;
+let activeBlogModalTrigger = null;
+
+function ensureBlogModal() {
+  let modal = document.querySelector("[data-blog-modal]");
+  if (modal) return modal;
+
+  modal = document.createElement("div");
+  modal.className = "blog-reader-modal";
+  modal.dataset.blogModal = "";
+  modal.hidden = true;
+  modal.setAttribute("role", "dialog");
+  modal.setAttribute("aria-modal", "true");
+  modal.setAttribute("aria-labelledby", "blog-reader-title");
+  modal.innerHTML = `
+    <div class="blog-reader-backdrop" data-blog-modal-close></div>
+    <article class="blog-reader-panel">
+      <button class="blog-reader-close" type="button" aria-label="Close blog reader" data-blog-modal-close>&times;</button>
+      <div class="blog-reader-media" data-blog-modal-media></div>
+      <div class="blog-reader-content">
+        <span data-blog-modal-category></span>
+        <h2 id="blog-reader-title" data-blog-modal-title></h2>
+        <div class="blog-reader-body" data-blog-modal-body></div>
+      </div>
+    </article>
+  `;
+  document.body.appendChild(modal);
+
+  modal.addEventListener("click", (event) => {
+    if (event.target.closest("[data-blog-modal-close]")) {
+      closeBlogModal();
+    }
   });
+
+  return modal;
+}
+
+function closeBlogModal() {
+  const modal = document.querySelector("[data-blog-modal]");
+  if (!modal) return;
+  modal.hidden = true;
+  document.body.classList.remove("blog-modal-open");
+  activeBlogModalTrigger?.focus();
+  activeBlogModalTrigger = null;
+}
+
+function openBlogModal(card, trigger) {
+  if (!card) return;
+  const modal = ensureBlogModal();
+  const title = card.querySelector("h2")?.textContent.trim() || "Blog";
+  const category = card.querySelector(".article-meta span")?.textContent.trim() || card.dataset.category || "Blog";
+  const image = card.querySelector(".article-card-image img")?.cloneNode(true);
+  const articleMore = card.querySelector(".article-more");
+  const excerpt = card.querySelector(":scope > p")?.cloneNode(true);
+  const mediaMount = modal.querySelector("[data-blog-modal-media]");
+  const bodyMount = modal.querySelector("[data-blog-modal-body]");
+
+  activeBlogModalTrigger = trigger || null;
+  modal.querySelector("[data-blog-modal-title]").textContent = title;
+  modal.querySelector("[data-blog-modal-category]").textContent = category;
+  mediaMount.replaceChildren();
+  bodyMount.replaceChildren();
+
+  if (image) {
+    image.removeAttribute("loading");
+    mediaMount.append(image);
+  }
+
+  if (articleMore?.children.length) {
+    bodyMount.replaceChildren(...Array.from(articleMore.children).map((child) => child.cloneNode(true)));
+  } else if (excerpt) {
+    bodyMount.append(excerpt);
+  }
+
+  modal.hidden = false;
+  document.body.classList.add("blog-modal-open");
+  modal.querySelector("[data-blog-modal-close]")?.focus();
+}
+
+function bindBlogExpandButtons(scope = document) {
+  scope.querySelectorAll("[data-expand]").forEach((button) => {
+    if (button.dataset.modalBound === "true") return;
+    button.dataset.modalBound = "true";
+    button.dataset.closedLabel = button.textContent;
+    button.addEventListener("click", () => {
+      openBlogModal(button.closest(".article-card"), button);
+    });
+  });
+}
+
+bindBlogExpandButtons();
+
+document.addEventListener("keydown", (event) => {
+  if (event.key === "Escape") {
+    closeBlogModal();
+  }
 });
 
 document.querySelectorAll("[data-founder-more]").forEach((button) => {
@@ -428,7 +522,7 @@ if (recommendations.length) {
 const contactForms = document.querySelectorAll("[data-contact-form]");
 const newsletterForms = document.querySelectorAll(".footer-newsletter");
 
-function showContactThanks() {
+function showContactThanks(text = "Thanks for writing and I will get back to you.") {
   let popup = document.querySelector("[data-contact-thanks]");
   if (!popup) {
     popup = document.createElement("div");
@@ -439,7 +533,7 @@ function showContactThanks() {
     popup.innerHTML = `
       <div class="contact-thanks-card">
         <button type="button" aria-label="Close message" data-contact-thanks-close>&times;</button>
-        <p>Thanks for writing and I will get back to you.</p>
+        <p data-contact-thanks-text></p>
       </div>
     `;
     document.body.appendChild(popup);
@@ -448,6 +542,10 @@ function showContactThanks() {
     });
   }
 
+  const popupText = popup.querySelector("[data-contact-thanks-text]");
+  if (popupText) {
+    popupText.textContent = text;
+  }
   popup.classList.add("show");
   window.clearTimeout(showContactThanks.timer);
   showContactThanks.timer = window.setTimeout(() => {
@@ -460,19 +558,38 @@ contactForms.forEach((contactForm) => {
     event.preventDefault();
     if (!contactForm.reportValidity()) return;
     const data = new FormData(contactForm);
+    const name = data.get("name") || "";
+    const email = data.get("email") || "";
     const service = data.get("service") || "General enquiry";
+    const story = data.get("message") || "";
+    const submitButton = contactForm.querySelector('button[type="submit"]');
+    const message = contactForm.querySelector("[data-contact-message]");
+    const originalButtonText = submitButton?.textContent;
     const subject = encodeURIComponent(`Nidhi S Mittal enquiry: ${service}`);
     const body = encodeURIComponent(
-      `Name: ${data.get("name")}\nEmail: ${data.get("email")}\nService: ${service}\n\nStory:\n${data.get("message")}`,
+      `Name: ${name}\nEmail: ${email}\nService: ${service}\n\nStory:\n${story}`,
     );
-    const message = contactForm.querySelector("[data-contact-message]");
-    if (message) {
-      message.textContent = "Thanks for writing and I will get back to you.";
+
+    if (submitButton) {
+      submitButton.disabled = true;
+      submitButton.textContent = "Opening email...";
     }
-    showContactThanks();
+    if (message) {
+      message.textContent = "Your email draft is opening. Please press Send in your mail app.";
+    }
+
+    window.location.href = `mailto:reach@nidhimittal.com?subject=${subject}&body=${body}`;
+    showContactThanks("Your email draft is ready. Please press Send in your mail app.");
+
     window.setTimeout(() => {
-      window.location.href = `mailto:reach@nidhimittal.com?subject=${subject}&body=${body}`;
-    }, 900);
+      if (submitButton) {
+        submitButton.disabled = false;
+        submitButton.textContent = originalButtonText || "Send the note";
+      }
+      if (message) {
+        message.textContent = "Email draft opened. Send it from your mail app to deliver the message.";
+      }
+    }, 1800);
   });
 });
 
@@ -481,8 +598,9 @@ newsletterForms.forEach((form) => {
     event.preventDefault();
     if (!form.reportValidity()) return;
     const email = new FormData(form).get("email") || "";
-    const subject = encodeURIComponent("Newsletter subscription");
-    const body = encodeURIComponent(`Please add this email to the newsletter list: ${email}`);
+    const subject = encodeURIComponent(form.dataset.newsletterSubject || "Newsletter subscription");
+    const bodyBase = form.dataset.newsletterBody || "Please add this email to the newsletter list";
+    const body = encodeURIComponent(`${bodyBase}: ${email}`);
     window.location.href = `mailto:reach@nidhimittal.com?subject=${subject}&body=${body}`;
   });
 });
@@ -647,14 +765,7 @@ function renderPublicPosts() {
     .sort((a, b) => new Date(b.updatedAt) - new Date(a.updatedAt));
 
   mount.replaceChildren(...publishedPosts.map(createPublicPostCard));
-  mount.querySelectorAll("[data-expand]").forEach((button) => {
-    button.dataset.closedLabel = button.textContent;
-    button.addEventListener("click", () => {
-      const card = button.closest(".article-card");
-      const expanded = card.classList.toggle("expanded");
-      button.textContent = expanded ? "Close note" : button.dataset.closedLabel;
-    });
-  });
+  bindBlogExpandButtons(mount);
   applyBlogFilter(blogState.category);
 }
 
