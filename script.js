@@ -663,16 +663,12 @@ function createPublicPostCard(post) {
   article.className = "article-card live-post";
   article.id = post.id;
   article.dataset.category = post.category;
-  const formattedDate = post.updatedAt
-    ? new Intl.DateTimeFormat("en", { day: "2-digit", month: "short", year: "numeric" }).format(new Date(post.updatedAt))
-    : "New note";
   article.innerHTML = `
     <figure class="article-card-image">
       <img src="assets/brand-awakening-blocks.webp" alt="" />
     </figure>
     <div class="article-meta">
       <span>${categoryLabels[post.category] || "Brand insight"}</span>
-      <time>${formattedDate}</time>
     </div>
     <h2>${escapeHtml(post.title)}</h2>
     <p>${escapeHtml(post.excerpt)}</p>
